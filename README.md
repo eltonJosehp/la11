@@ -67,3 +67,9 @@ public/
 ## Seguridad de despliegue
 
 Use HTTPS, una clave de sesión aleatoria, un proceso Node administrado (por ejemplo, systemd o PM2), respaldos periódicos de `data/bodega.db` y permisos de escritura limitados a `data/` y `public/uploads/`.
+
+## Despliegue gratuito en Render
+
+El repositorio incluye `render.yaml`. Desde el panel de Render, cree un **Blueprint**, seleccione este repositorio e introduzca una contraseña segura en `ADMIN_PASSWORD`.
+
+> El sistema funciona en el plan gratuito, pero Render elimina la base SQLite y las imágenes cargadas cuando el servicio reinicia, se suspende o vuelve a desplegarse. Esta modalidad es únicamente para demostración.

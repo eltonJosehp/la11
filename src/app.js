@@ -8,12 +8,14 @@ class SessionStore extends session.Store {
   destroy(sid,cb){try{db.prepare('DELETE FROM sesiones WHERE sid=?').run(sid);cb?.()}catch(e){cb?.(e)}}
 }
 const app=express();
+app.set('trust proxy', 1);
 app.use(helmet({contentSecurityPolicy:false}));
 app.use(express.json({limit:'1mb'}));app.use(express.urlencoded({extended:false}));
 app.use(session({store:new SessionStore(),name:'bodega.sid',
   secret:process.env.SESSION_SECRET||'desarrollo-cambie-esta-clave',resave:false,saveUninitialized:false,
   cookie:{httpOnly:true,sameSite:'lax',secure:process.env.NODE_ENV==='production',maxAge:8*60*60*1000}}));
 app.use(express.static(path.resolve('public')));
+app.get('/health',(req,res)=>res.json({status:'ok'}));
 app.use('/api',require('./routes'));
 app.use((req,res,next)=>req.method==='GET'?res.sendFile(path.resolve('src/views/index.html')):next());
 app.use(require('./middleware/errors'));
