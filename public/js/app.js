@@ -1,5 +1,5 @@
 const $=s=>document.querySelector(s), money=n=>new Intl.NumberFormat('es-CO',{style:'currency',currency:'COP',maximumFractionDigits:0}).format(n||0);
-let user=null, cart=[], products=[], meta={categorias:[],marcas:[]}, current='pos';
+let user=null, cart=[], products=[], meta={categorias:[],marcas:[]}, current='pos', activeScanner=null;
 async function api(url,opt={}){const r=await fetch('/api'+url,{headers:{'Content-Type':'application/json',...(opt.headers||{})},...opt});const data=await r.json().catch(()=>({}));if(!r.ok)throw Error(data.error||'No fue posible completar la operación');return data}
 function toast(msg){const el=$('#toast');el.textContent=msg;el.classList.add('show');setTimeout(()=>el.classList.remove('show'),2600)}
 const navAdmin=[['dashboard','⌁','Resumen'],['pos','▦','Punto de venta'],['products','◇','Productos'],['purchases','↓','Compras'],['inventory','≋','Inventario'],['sales','↗','Ventas'],['suppliers','♙','Proveedores'],['users','◎','Usuarios'],['config','⚙','Configuración']];
@@ -24,49 +24,83 @@ function searchPos(e){const q=e.target.value.toLowerCase(),r=products.filter(p=>
 function addCart(id){const p=products.find(x=>x.id==id),line=cart.find(x=>x.id==id);if(!p||p.stock<=0)return toast('Producto sin stock');if(line){if(line.qty>=p.stock)return toast('No hay más stock disponible');line.qty++}else cart.push({...p,qty:1});$('#posSearch').value='';$('#results').hidden=true;drawCart()}
 function qty(id,n){const l=cart.find(x=>x.id==id);l.qty+=n;if(l.qty<1)cart=cart.filter(x=>x.id!=id);if(l&&l.qty>l.stock){l.qty=l.stock;toast('Límite de stock alcanzado')}drawCart()}
 function drawCart(){const box=$('#cart'),co=$('#checkout');if(!cart.length){box.innerHTML='<div class="empty">La canasta está vacía.<br>Busca o escanea un producto para comenzar.</div>';co.innerHTML='<div class="total"><span>Total</span><strong>$0</strong></div><button class="primary wide" disabled>Continuar</button>';return}box.innerHTML=cart.map(x=>`<div class="cart-line"><div><strong>${esc(x.nombre)}</strong><small class="muted"><br>${money(x.precio)} · stock ${x.stock}</small></div><div class="qty"><button onclick="qty(${x.id},-1)">−</button><strong>${x.qty}</strong><button onclick="qty(${x.id},1)">+</button></div><strong>${money(x.precio*x.qty)}</strong></div>`).join('');const total=cart.reduce((s,x)=>s+x.precio*x.qty,0);co.innerHTML=`<div class="total"><span>Total</span><strong>${money(total)}</strong></div><button class="primary wide" onclick="payment()">Cobrar <span>→</span></button>`}
-async function scan(onFound=addCart){if(!('BarcodeDetector'in window))return toast('Detector no disponible; use la búsqueda manual');const body=$('#modalBody');body.innerHTML='<h3>Escanear código</h3><video autoplay playsinline></video><p class="muted">Apunte la cámara al código de barras.</p>';modal.showModal();const video=body.querySelector('video');let stream;try{stream=await navigator.mediaDevices.getUserMedia({video:{facingMode:'environment'}});video.srcObject=stream;const detector=new BarcodeDetector({formats:['ean_13','ean_8','upc_a','code_128']});const tick=async()=>{if(!modal.open)return stream.getTracks().forEach(t=>t.stop());const codes=await detector.detect(video);if(codes[0]){const p=products.find(x=>x.codigo_barras===codes[0].rawValue);stream.getTracks().forEach(t=>t.stop());modal.close();p?onFound(p.id):toast(`Código ${codes[0].rawValue} no registrado`);return}requestAnimationFrame(tick)};tick()}catch(e){modal.close();toast('No se pudo acceder a la cámara')}}
-async function newProduct(){
-  if(!navigator.mediaDevices?.getUserMedia||!('BarcodeDetector'in window)){
-    toast('La cámara automática no está disponible; ingrese el código manualmente');
-    return productForm(null,'');
-  }
-  scanProductCode();
+async function stopScanner(){
+  const scanner=activeScanner;
+  activeScanner=null;
+  if(!scanner)return;
+  try{if(scanner.getState?.()===2)await scanner.stop()}catch(e){}
+  try{scanner.clear()}catch(e){}
 }
-async function scanProductCode(){
+function cameraMessage(error){
+  const text=String(error?.message||error||'');
+  if(/NotAllowed|Permission|denied/i.test(text))return 'El navegador bloqueó la cámara. Habilítela en el candado de la barra de direcciones y vuelva a intentar.';
+  if(/NotFound|DevicesNotFound/i.test(text))return 'No se encontró una cámara disponible en este dispositivo.';
+  if(/NotReadable|TrackStart|Could not start/i.test(text))return 'La cámara está siendo usada por otra aplicación. Ciérrela y pulse Reintentar.';
+  if(/Overconstrained/i.test(text))return 'La cámara trasera no está disponible. Seleccione otra cámara.';
+  return 'No se pudo iniciar la cámara. Seleccione otra cámara o utilice una foto del código.';
+}
+async function openScanner({title='Escanear código',onCode,onManual}){
+  await stopScanner();
   const body=$('#modalBody');
-  body.innerHTML='<h2>Escanear nuevo producto</h2><video autoplay playsinline muted></video><div class="scan-status">Apunte la cámara al código de barras. El formulario se abrirá cuando sea reconocido.</div><div class="scan-actions"><button class="ghost" id="manualProduct">Ingresar código manualmente</button></div>';
+  body.innerHTML=`<h2>${title}</h2><div id="scannerReader"></div><div id="scannerStatus" class="scan-status">Preparando cámara…</div><label id="cameraLabel">Cámara<select id="cameraSelect"></select></label><div class="scan-actions"><button class="ghost" id="retryCamera">Reintentar</button><label class="ghost file-scan">Leer una foto<input id="barcodeImage" type="file" accept="image/*" capture="environment"></label><button class="ghost" id="manualScan">Ingresar manualmente</button></div>`;
   if(!modal.open)modal.showModal();
-  const video=body.querySelector('video');
-  let stream;
-  let stopped=false;
-  const stop=()=>{if(stopped)return;stopped=true;stream?.getTracks().forEach(t=>t.stop())};
-  $('#manualProduct').onclick=()=>{stop();modal.close();productForm(null,'')};
-  try{
-    stream=await navigator.mediaDevices.getUserMedia({video:{facingMode:{ideal:'environment'}}});
-    video.srcObject=stream;
-    const detector=new BarcodeDetector({formats:['ean_13','ean_8','upc_a','upc_e','code_128','code_39','codabar','itf']});
-    const detect=async()=>{
-      if(!modal.open||stopped)return stop();
-      try{
-        const codes=await detector.detect(video);
-        if(codes[0]?.rawValue){
-          const barcode=codes[0].rawValue.trim();
-          stop();modal.close();
-          const existing=products.find(p=>p.codigo_barras===barcode);
-          if(existing){toast('El código ya pertenece a un producto');productForm(existing.id,barcode)}
-          else{toast('Código capturado correctamente');productForm(null,barcode)}
-          return;
-        }
-      }catch(e){}
-      requestAnimationFrame(detect);
-    };
-    detect();
-  }catch(e){
-    stop();
-    body.innerHTML='<h2>No se pudo abrir la cámara</h2><p class="muted">Revise el permiso de cámara o continúe escribiendo el código de barras.</p><button class="primary" id="manualFallback">Continuar manualmente</button>';
-    $('#manualFallback').onclick=()=>{modal.close();productForm(null,'')};
+  const status=$('#scannerStatus'),select=$('#cameraSelect'),label=$('#cameraLabel');
+  if(typeof Html5Qrcode==='undefined'){
+    status.textContent='El lector no pudo cargarse. Actualice la página con Ctrl + F5.';
+    status.classList.add('error-state');label.hidden=true;
+    $('#manualScan').onclick=()=>{modal.close();onManual?.()};
+    return;
   }
+  activeScanner=new Html5Qrcode('scannerReader',{formatsToSupport:[
+    Html5QrcodeSupportedFormats.EAN_13,Html5QrcodeSupportedFormats.EAN_8,
+    Html5QrcodeSupportedFormats.UPC_A,Html5QrcodeSupportedFormats.UPC_E,
+    Html5QrcodeSupportedFormats.CODE_128,Html5QrcodeSupportedFormats.CODE_39,
+    Html5QrcodeSupportedFormats.ITF,Html5QrcodeSupportedFormats.CODABAR
+  ],verbose:false});
+  let cameras=[];
+  const success=async decoded=>{
+    const code=String(decoded||'').trim();
+    if(!code||!activeScanner)return;
+    await stopScanner();modal.close();onCode(code);
+  };
+  const start=async cameraId=>{
+    await stopScanner();
+    activeScanner=new Html5Qrcode('scannerReader',{formatsToSupport:[
+      Html5QrcodeSupportedFormats.EAN_13,Html5QrcodeSupportedFormats.EAN_8,
+      Html5QrcodeSupportedFormats.UPC_A,Html5QrcodeSupportedFormats.UPC_E,
+      Html5QrcodeSupportedFormats.CODE_128,Html5QrcodeSupportedFormats.CODE_39,
+      Html5QrcodeSupportedFormats.ITF,Html5QrcodeSupportedFormats.CODABAR
+    ],verbose:false});
+    status.textContent='Iniciando cámara…';status.classList.remove('error-state');
+    try{
+      await activeScanner.start(cameraId,{fps:12,qrbox:(w,h)=>({width:Math.min(w*.9,420),height:Math.min(h*.38,180)}),aspectRatio:1.777},success,()=>{});
+      status.textContent='Cámara activa. Centre el código de barras dentro del recuadro.';
+    }catch(error){status.textContent=cameraMessage(error);status.classList.add('error-state')}
+  };
+  const load=async()=>{
+    try{
+      cameras=await Html5Qrcode.getCameras();
+      if(!cameras.length)throw Error('NotFoundError');
+      select.innerHTML=cameras.map(c=>`<option value="${esc(c.id)}">${esc(c.label||`Cámara ${cameras.indexOf(c)+1}`)}</option>`).join('');
+      const rear=cameras.find(c=>/back|rear|environment|trasera|posterior/i.test(c.label))||cameras[cameras.length-1];
+      select.value=rear.id;label.hidden=cameras.length<2;await start(rear.id);
+    }catch(error){status.textContent=cameraMessage(error);status.classList.add('error-state');label.hidden=true}
+  };
+  select.onchange=()=>start(select.value);
+  $('#retryCamera').onclick=load;
+  $('#manualScan').onclick=async()=>{await stopScanner();modal.close();onManual?.()};
+  $('#barcodeImage').onchange=async e=>{
+    const file=e.target.files?.[0];if(!file)return;
+    await stopScanner();
+    activeScanner=new Html5Qrcode('scannerReader');
+    try{const code=await activeScanner.scanFile(file,true);await stopScanner();modal.close();onCode(String(code).trim())}
+    catch(error){status.textContent='No se detectó un código en la foto. Intente acercarse y evitar reflejos.';status.classList.add('error-state')}
+  };
+  load();
 }
+async function scan(onFound=addCart){openScanner({title:'Escanear producto',onCode:code=>{const p=products.find(x=>x.codigo_barras===code);p?onFound(p.id):toast(`Código ${code} no registrado`)},onManual:()=>toast('Use la búsqueda manual de productos')})}
+function newProduct(){scanProductCode()}
+function scanProductCode(){openScanner({title:'Escanear nuevo producto',onCode:barcode=>{const existing=products.find(p=>p.codigo_barras===barcode);if(existing){toast('El código ya pertenece a un producto');productForm(existing.id,barcode)}else{toast('Código capturado correctamente');productForm(null,barcode)}},onManual:()=>productForm(null,'')})}
 function payment(){const total=cart.reduce((s,x)=>s+x.precio*x.qty,0);$('#modalBody').innerHTML=`<h2>Cobrar ${money(total)}</h2><label>Método<select id="payMethod"><option value="efectivo">Efectivo</option><option value="qr">QR</option></select></label><div id="payDetail"><label>Monto recibido<input id="received" type="number" min="${total}" value="${total}"></label></div><button class="primary wide" id="confirmPay">Confirmar venta →</button>`;modal.showModal();$('#payMethod').onchange=async e=>{if(e.target.value==='qr'){const c=await api('/config');$('#payDetail').innerHTML=`${c.qr_pago?`<img src="${c.qr_pago}" style="width:190px;display:block;margin:auto">`:'<p class="error">El administrador aún no configuró un QR.</p>'}<label><input id="qrOk" type="checkbox" style="width:auto"> Confirmo que el pago fue recibido</label>`}else $('#payDetail').innerHTML=`<label>Monto recibido<input id="received" type="number" min="${total}" value="${total}"></label>`};$('#confirmPay').onclick=async()=>{const method=$('#payMethod').value,r=await api('/sales',{method:'POST',body:JSON.stringify({items:cart.map(x=>({producto_id:x.id,cantidad:x.qty})),metodo_pago:method,recibido:Number($('#received')?.value||total),qr_confirmado:$('#qrOk')?.checked})});cart=[];modal.close();toast(`Venta ${r.numero} completada · vuelto ${money(r.vuelto)}`);render('pos')}}
 function drawProducts(q){const p=products.filter(x=>[x.nombre,x.codigo_interno,x.codigo_barras].some(v=>String(v||'').toLowerCase().includes(q.toLowerCase())));$('#prodTable').innerHTML=table(['Producto','Código','Categoría','Precio','Stock','Estado',''],p.map(x=>[`<strong>${esc(x.nombre)}</strong><small class="muted"><br>${esc(x.marca||'')}</small>`,esc(x.codigo_barras||x.codigo_interno),esc(x.categoria||'—'),money(x.precio),x.stock,status(x),`<button class="ghost" onclick="productForm(${x.id})">Editar</button>`]))}
 function productForm(id,barcodePreset=''){const p=products.find(x=>x.id==id)||{};const barcode=barcodePreset||p.codigo_barras||'';$('#modalBody').innerHTML=`<h2>${id?'Editar':'Nuevo'} producto</h2>${barcodePreset?`<div class="scan-status">✓ Código leído por cámara: <strong>${esc(barcodePreset)}</strong></div>`:''}<form id="productForm" class="form-grid"><label>Código interno<input name="codigo_interno" required value="${esc(p.codigo_interno||'')}"></label><label>Código de barras<div class="row"><input id="productBarcode" name="codigo_barras" inputmode="numeric" value="${esc(barcode)}"><button type="button" class="scan-btn" id="rescanProduct" title="Escanear">▣</button></div></label><label class="full">Nombre<input name="nombre" required value="${esc(p.nombre||'')}"></label><label>Categoría<select name="categoria_id"><option value="">Sin categoría</option>${meta.categorias.map(x=>`<option value="${x.id}" ${p.categoria_id==x.id?'selected':''}>${esc(x.nombre)}</option>`)}</select></label><label>Marca<select name="marca_id"><option value="">Sin marca</option>${meta.marcas.map(x=>`<option value="${x.id}" ${p.marca_id==x.id?'selected':''}>${esc(x.nombre)}</option>`)}</select></label><label>Costo<input name="costo" type="number" min="0" step=".01" value="${p.costo||0}"></label><label>Precio de venta<input name="precio" type="number" min="0" step=".01" required value="${p.precio||''}"></label><label>Stock mínimo<input name="stock_minimo" type="number" min="0" step=".01" value="${p.stock_minimo||0}"></label><label>Unidad<input name="unidad" value="${esc(p.unidad||'unidad')}"></label><label>Vencimiento<input name="vencimiento" type="date" value="${p.vencimiento||''}"></label>${id?`<label>Estado<select name="activo"><option value="1" ${p.activo?'selected':''}>Activo</option><option value="0" ${!p.activo?'selected':''}>Desactivado</option></select></label>`:''}<label class="full">Descripción<textarea name="descripcion">${esc(p.descripcion||'')}</textarea></label><button class="primary full">Guardar producto</button></form>`;if(!modal.open)modal.showModal();$('#rescanProduct').onclick=()=>{modal.close();scanProductCode()};$('#productForm').onsubmit=async e=>{e.preventDefault();const b=Object.fromEntries(new FormData(e.target));await api(id?`/products/${id}`:'/products',{method:id?'PUT':'POST',body:JSON.stringify(b)});modal.close();toast('Producto guardado');render('products')}}
@@ -81,4 +115,5 @@ function formModal(title,fields,url,page){$('#modalBody').innerHTML=`<h2>${title
 function adjust(id){const p=products.find(x=>x.id==id);$('#modalBody').innerHTML=`<h2>Ajustar stock</h2><p>${esc(p.nombre)} · Stock actual: <strong>${p.stock}</strong></p><form id="adj"><label>Cantidad (+ entrada / − salida)<input name="cantidad" type="number" step=".01" required></label><label>Motivo<input name="referencia" required></label><button class="primary">Registrar ajuste</button></form>`;modal.showModal();$('#adj').onsubmit=async e=>{e.preventDefault();await api(`/products/${id}/adjust`,{method:'POST',body:JSON.stringify(Object.fromEntries(new FormData(e.target)))});modal.close();toast('Stock ajustado con trazabilidad');render('inventory')}}
 $('#loginForm').onsubmit=async e=>{e.preventDefault();$('#loginError').textContent='';try{user=await api('/auth/login',{method:'POST',body:JSON.stringify(Object.fromEntries(new FormData(e.target)))});setup()}catch(x){$('#loginError').textContent=x.message}};
 $('#logout').onclick=async()=>{await api('/auth/logout',{method:'POST'});location.reload()};$('#menu').onclick=()=> $('aside').classList.toggle('open');
+$('#modal').addEventListener('close',()=>stopScanner());
 (async()=>{user=await api('/auth/me').catch(()=>null);if(user)setup()})();
