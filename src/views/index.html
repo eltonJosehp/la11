@@ -1,0 +1,32 @@
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+  <meta name="theme-color" content="#111713"><title>Licorería La 11</title>
+  <link rel="stylesheet" href="/css/app.css">
+</head>
+<body>
+  <div id="login" class="login-shell">
+    <section class="login-card">
+      <div class="brand-mark">11</div><p class="eyebrow">SISTEMA DE BODEGA</p>
+      <h1>Licorería La 11</h1><p class="muted">Inventario y ventas, bajo control.</p>
+      <form id="loginForm"><label>Usuario<input name="usuario" autocomplete="username" required value="admin"></label>
+        <label>Contraseña<input name="password" type="password" autocomplete="current-password" required></label>
+        <button class="primary wide">Ingresar <span>→</span></button><p id="loginError" class="error"></p></form>
+    </section>
+  </div>
+  <div id="app" hidden>
+    <aside>
+      <div class="brand"><div class="brand-mark small">11</div><div><strong>La 11</strong><small>Gestión de bodega</small></div></div>
+      <nav id="nav"></nav>
+      <div class="userbox"><div class="avatar" id="avatar">A</div><div><strong id="userName"></strong><small id="userRole"></small></div><button id="logout" title="Salir">↗</button></div>
+    </aside>
+    <main>
+      <header><button id="menu" class="icon-btn">☰</button><div><p class="eyebrow" id="crumb">OPERACIÓN</p><h2 id="pageTitle">Punto de venta</h2></div><div class="date" id="date"></div></header>
+      <div id="content"></div>
+    </main>
+  </div>
+  <div id="toast"></div>
+  <dialog id="modal"><button class="close" onclick="modal.close()">×</button><div id="modalBody"></div></dialog>
+  <script src="/js/app.js"></script>
+</body></html>
