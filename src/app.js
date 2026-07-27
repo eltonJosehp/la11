@@ -14,7 +14,8 @@ app.use(express.json({limit:'1mb'}));app.use(express.urlencoded({extended:false}
 app.use(session({store:new SessionStore(),name:'bodega.sid',
   secret:process.env.SESSION_SECRET||'desarrollo-cambie-esta-clave',resave:false,saveUninitialized:false,
   cookie:{httpOnly:true,sameSite:'lax',secure:process.env.NODE_ENV==='production',maxAge:8*60*60*1000}}));
-app.use('/vendor/html5-qrcode',express.static(path.resolve('node_modules/html5-qrcode')));
+app.use('/vendor/zbar',express.static(path.resolve('node_modules/@undecaf/zbar-wasm/dist/inlined')));
+app.use('/vendor/opencv',express.static(path.resolve('node_modules/@techstark/opencv-js/dist')));
 app.use(express.static(path.resolve('public')));
 app.get('/health',(req,res)=>res.json({status:'ok'}));
 app.use('/api',require('./routes'));
