@@ -98,9 +98,30 @@ CREATE TABLE IF NOT EXISTS historial_precios (
 CREATE TABLE IF NOT EXISTS configuracion (
   clave TEXT PRIMARY KEY, valor TEXT, actualizado_en TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
+CREATE TABLE IF NOT EXISTS combo_detalle (
+  combo_producto_id INTEGER NOT NULL,
+  componente_producto_id INTEGER NOT NULL,
+  cantidad REAL NOT NULL CHECK(cantidad > 0),
+  PRIMARY KEY(combo_producto_id, componente_producto_id),
+  CHECK(combo_producto_id <> componente_producto_id),
+  FOREIGN KEY(combo_producto_id) REFERENCES productos(id),
+  FOREIGN KEY(componente_producto_id) REFERENCES productos(id)
+);
 `);
 
+const columns = table => db.prepare(`PRAGMA table_info(${table})`).all().map(column => column.name);
+const productColumns = columns('productos');
+if (!productColumns.includes('imagen')) db.exec('ALTER TABLE productos ADD COLUMN imagen TEXT');
+if (!productColumns.includes('es_combo')) db.exec('ALTER TABLE productos ADD COLUMN es_combo INTEGER NOT NULL DEFAULT 0 CHECK(es_combo IN (0,1))');
+
 db.prepare("INSERT OR IGNORE INTO roles(id,nombre) VALUES(1,'administrador'),(2,'vendedor')").run();
+const initialCategories = [
+  'Cervezas','Vinos','Ron','Whisky','Vodka','Tequila','Pisco','Gin',
+  'Licores y aperitivos','Gaseosas','Bebidas listas para tomar','Combos',
+  'Aguas','Energizantes','Jugos','Hielo','Snacks','Cigarrillos','Chicles y dulces'
+];
+const insertCategory = db.prepare('INSERT OR IGNORE INTO categorias(nombre) VALUES(?)');
+db.transaction(() => initialCategories.forEach(name => insertCategory.run(name)))();
 const adminUser = process.env.ADMIN_USER || 'admin';
 if (!db.prepare('SELECT 1 FROM usuarios WHERE usuario=?').get(adminUser)) {
   db.prepare('INSERT INTO usuarios(usuario,nombre,password_hash,rol_id) VALUES(?,?,?,1)')

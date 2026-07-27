@@ -21,12 +21,35 @@ exports.saveSupplier = (req,res) => {
     VALUES(?,?,?,?,?,?,?)`).run(b.ruc||null,b.razon_social.trim(),b.nombre_comercial||null,b.telefono||null,b.correo||null,b.direccion||null,b.contacto||null);
   res.status(201).json({id:i.lastInsertRowid});
 };
+exports.updateSupplier=(req,res)=>{
+  const b=req.body;
+  if(!b.razon_social?.trim()) return res.status(400).json({error:'La razón social es obligatoria'});
+  db.prepare(`UPDATE proveedores SET ruc=?,razon_social=?,nombre_comercial=?,telefono=?,correo=?,direccion=?,contacto=?,activo=? WHERE id=?`)
+    .run(b.ruc||null,b.razon_social.trim(),b.nombre_comercial||null,b.telefono||null,b.correo||null,b.direccion||null,b.contacto||null,
+      b.activo===false||b.activo==='0'?0:1,req.params.id);
+  res.json({id:Number(req.params.id)});
+};
+exports.deleteSupplier=(req,res)=>{db.prepare('UPDATE proveedores SET activo=0 WHERE id=?').run(req.params.id);res.json({ok:true})};
 exports.users=(req,res)=>res.json(db.prepare(`SELECT u.id,u.usuario,u.nombre,u.activo,r.nombre rol FROM usuarios u JOIN roles r ON r.id=u.rol_id ORDER BY u.nombre`).all());
 exports.saveUser=(req,res)=>{
   const b=req.body;if(!b.usuario||!b.nombre||!b.password||!['administrador','vendedor'].includes(b.rol)) return res.status(400).json({error:'Datos de usuario inválidos'});
   const role=db.prepare('SELECT id FROM roles WHERE nombre=?').get(b.rol);
   const i=db.prepare('INSERT INTO usuarios(usuario,nombre,password_hash,rol_id) VALUES(?,?,?,?)').run(b.usuario.trim(),b.nombre.trim(),bcrypt.hashSync(b.password,12),role.id);
   res.status(201).json({id:i.lastInsertRowid});
+};
+exports.updateUser=(req,res)=>{
+  const b=req.body,user=db.prepare('SELECT * FROM usuarios WHERE id=?').get(req.params.id);
+  if(!user||!b.usuario?.trim()||!b.nombre?.trim()||!['administrador','vendedor'].includes(b.rol)) return res.status(400).json({error:'Datos de usuario inválidos'});
+  const role=db.prepare('SELECT id FROM roles WHERE nombre=?').get(b.rol);
+  if(b.password) db.prepare('UPDATE usuarios SET usuario=?,nombre=?,password_hash=?,rol_id=?,activo=? WHERE id=?')
+    .run(b.usuario.trim(),b.nombre.trim(),bcrypt.hashSync(b.password,12),role.id,b.activo===false||b.activo==='0'?0:1,user.id);
+  else db.prepare('UPDATE usuarios SET usuario=?,nombre=?,rol_id=?,activo=? WHERE id=?')
+    .run(b.usuario.trim(),b.nombre.trim(),role.id,b.activo===false||b.activo==='0'?0:1,user.id);
+  res.json({id:user.id});
+};
+exports.deleteUser=(req,res)=>{
+  if(Number(req.params.id)===req.session.user.id) return res.status(400).json({error:'No puede desactivar su propia cuenta'});
+  db.prepare('UPDATE usuarios SET activo=0 WHERE id=?').run(req.params.id);res.json({ok:true});
 };
 exports.config=(req,res)=>res.json(Object.fromEntries(db.prepare('SELECT clave,valor FROM configuracion').all().map(x=>[x.clave,x.valor])));
 exports.qr=(req,res)=>{
