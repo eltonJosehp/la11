@@ -38,8 +38,8 @@ exports.update = (req, res) => {
   if (!old) return res.status(404).json({ error: 'Producto no encontrado' });
   const b = req.body, costo = Number(b.costo), precio = Number(b.precio),discount=discountData(b);
   if(!Number.isFinite(costo)||costo<0||!Number.isFinite(precio)||precio<0)throw bad('Costo o precio inválido');
-  if((b.es_combo===true||b.es_combo==='1')&&Catalog.comboItems(old.id).length>=2&&precio>=old.precio_original)
-    throw bad(`El precio especial del combo debe ser menor que la suma original (${old.precio_original})`);
+  if((b.es_combo===true||b.es_combo==='1')&&Catalog.comboItems(old.id).length>=2&&precio>old.precio_original)
+    throw bad(`El precio del combo no puede superar la suma original (${old.precio_original})`);
   db.transaction(() => {
     db.prepare(`UPDATE productos SET codigo_interno=?,codigo_barras=?,nombre=?,categoria_id=?,marca_id=?,descripcion=?,
       costo=?,precio=?,stock_minimo=?,unidad=?,vencimiento=?,activo=?,es_combo=?,descuento_tipo=?,descuento_valor=?,
@@ -119,12 +119,15 @@ exports.combo = (req,res) => {
     }
     const original=db.prepare(`SELECT COALESCE(SUM(p.precio*cd.cantidad),0) total FROM combo_detalle cd
       JOIN productos p ON p.id=cd.componente_producto_id WHERE cd.combo_producto_id=?`).get(combo.id).total;
+    const applyDiscount=!(req.body.aplicar_descuento===false||req.body.aplicar_descuento==='0'||req.body.aplicar_descuento===0);
     const requestedFinal=Number(req.body.precio_final),requestedPercent=Number(req.body.descuento_porcentaje);
-    let finalPrice=Number.isFinite(requestedFinal)&&requestedFinal>0?requestedFinal:null;
-    if(finalPrice===null&&Number.isFinite(requestedPercent)&&requestedPercent>0&&requestedPercent<100)
+    let finalPrice=applyDiscount&&(Number.isFinite(requestedFinal)&&requestedFinal>0)?requestedFinal:null;
+    if(applyDiscount&&finalPrice===null&&Number.isFinite(requestedPercent)&&requestedPercent>0&&requestedPercent<100)
       finalPrice=Math.round(original*(1-requestedPercent/100)*100)/100;
-    if(!Number.isFinite(finalPrice)||finalPrice<=0||finalPrice>=original)
-      throw bad(`Indique un precio final menor que la suma original (${original}) o un descuento entre 0% y 100%`);
+    if(!applyDiscount)finalPrice=original;
+    if(!Number.isFinite(finalPrice)||finalPrice<=0||finalPrice>original||(applyDiscount&&finalPrice>=original))
+      throw bad(applyDiscount?`Indique un precio final menor que la suma original (${original}) o un descuento entre 0% y 100%`:
+        'No fue posible calcular el precio del combo');
     finalPrice=Math.round(finalPrice*100)/100;
     if(combo.precio_base!==finalPrice){
       db.prepare('UPDATE productos SET precio=?,actualizado_en=CURRENT_TIMESTAMP WHERE id=?').run(finalPrice,combo.id);
@@ -137,3 +140,47 @@ exports.combo = (req,res) => {
     precio_final:result.finalPrice,descuento_porcentaje:result.percent});
 };
 exports.comboItems = (req,res) => res.json(Catalog.comboItems(req.params.id));
+
+exports.saveComboFull=(req,res)=>{
+  const b=req.body.product||{},items=req.body.items;
+  if(!b.codigo_interno?.trim()||!b.nombre?.trim())throw bad('Código interno y nombre del combo son obligatorios');
+  const uniqueItems=Array.isArray(items)?new Set(items.map(item=>Number(item.producto_id))):new Set();
+  if(!Array.isArray(items)||items.length<2||uniqueItems.size<2)throw bad('Seleccione al menos dos productos diferentes');
+  const existing=req.params.id?Catalog.product(req.params.id):null;
+  if(req.params.id&&(!existing||!existing.es_combo))return res.status(404).json({error:'Combo no encontrado'});
+  const savedId=db.transaction(()=>{
+    let comboId;
+    if(existing){
+      db.prepare(`UPDATE productos SET codigo_interno=?,codigo_barras=NULL,nombre=?,categoria_id=?,marca_id=?,descripcion=?,
+        costo=?,stock_minimo=0,unidad=?,vencimiento=NULL,activo=?,es_combo=1,descuento_tipo='ninguno',descuento_valor=0,
+        descuento_inicio=NULL,descuento_fin=NULL,descuento_nombre=NULL,actualizado_en=CURRENT_TIMESTAMP WHERE id=?`)
+        .run(b.codigo_interno.trim(),b.nombre.trim(),b.categoria_id||null,b.marca_id||null,b.descripcion||null,
+          Number(b.costo||0),b.unidad||'combo',(b.activo===false||b.activo==='0')?0:1,existing.id);
+      comboId=existing.id;
+    }else{
+      comboId=db.prepare(`INSERT INTO productos(codigo_interno,codigo_barras,nombre,categoria_id,marca_id,descripcion,costo,precio,
+        stock_minimo,unidad,es_combo) VALUES(?,NULL,?,?,?,?,?,0,0,?,1)`)
+        .run(b.codigo_interno.trim(),b.nombre.trim(),b.categoria_id||null,b.marca_id||null,b.descripcion||null,
+          Number(b.costo||0),b.unidad||'combo').lastInsertRowid;
+    }
+    db.prepare('DELETE FROM combo_detalle WHERE combo_producto_id=?').run(comboId);
+    const insert=db.prepare('INSERT INTO combo_detalle(combo_producto_id,componente_producto_id,cantidad) VALUES(?,?,?)');
+    for(const item of items){
+      const product=Catalog.product(item.producto_id),quantity=Number(item.cantidad);
+      if(!product||product.es_combo||!product.activo||!Number.isFinite(quantity)||quantity<=0)throw bad('Componente o cantidad inválida');
+      insert.run(comboId,product.id,quantity);
+    }
+    const original=db.prepare(`SELECT SUM(p.precio*cd.cantidad) total FROM combo_detalle cd
+      JOIN productos p ON p.id=cd.componente_producto_id WHERE cd.combo_producto_id=?`).get(comboId).total;
+    const apply=!(req.body.aplicar_descuento===false||req.body.aplicar_descuento==='0'||req.body.aplicar_descuento===0);
+    const requestedFinal=Number(req.body.precio_final),percent=Number(req.body.descuento_porcentaje);
+    let finalPrice=apply&&requestedFinal>0?requestedFinal:apply&&percent>0&&percent<100?Math.round(original*(1-percent/100)*100)/100:original;
+    finalPrice=Math.round(finalPrice*100)/100;
+    if(finalPrice<=0||finalPrice>original||(apply&&finalPrice>=original))throw bad('Revise el descuento o precio final del combo');
+    db.prepare('UPDATE productos SET precio=?,actualizado_en=CURRENT_TIMESTAMP WHERE id=?').run(finalPrice,comboId);
+    if(existing&&existing.precio_base!==finalPrice)db.prepare(`INSERT INTO historial_precios(producto_id,costo_anterior,costo_nuevo,
+      precio_anterior,precio_nuevo,usuario_id) VALUES(?,?,?,?,?,?)`).run(comboId,existing.costo,Number(b.costo||0),existing.precio_base,finalPrice,req.session.user.id);
+    return comboId;
+  })();
+  res.status(existing?200:201).json(Catalog.product(savedId));
+};

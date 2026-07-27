@@ -13,6 +13,7 @@ r.get('/sales/:id',ops.saleDetails);r.get('/sales/:id/receipt',ops.receipt);
 r.get('/config',admin.config);
 r.use(requireRole('administrador'));
 r.post('/products',products.save);r.put('/products/:id',products.update);r.delete('/products/:id',products.remove);
+r.post('/combos',products.saveComboFull);r.put('/combos/:id',products.saveComboFull);
 r.post('/products/:id/adjust',products.adjust);r.post('/products/:id/image',upload.single('imagen'),products.image);
 r.get('/products/:id/combo',products.comboItems);r.put('/products/:id/combo',products.combo);
 r.post('/meta/:type',products.addMeta);r.put('/meta/:type/:id',products.updateMeta);r.delete('/meta/:type/:id',products.deleteMeta);

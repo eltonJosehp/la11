@@ -45,6 +45,8 @@ Antes de usar el sistema en producción, cambie `ADMIN_PASSWORD` y `SESSION_SECR
 - Los combos exigen al menos dos productos y descuentan automáticamente las existencias de sus componentes.
 - El precio original del combo se calcula sumando los precios base de sus componentes; su precio especial debe producir un ahorro real.
 - Los combos no requieren código de barras y permiten definir el porcentaje de descuento o el precio final; ambos valores se sincronizan.
+- Productos y combos muestran las opciones promocionales únicamente al seleccionar “Aplicar descuento”.
+- El combo se crea en una sola interfaz y una sola transacción, incluyendo datos, componentes, precio e imagen.
 - Los productos admiten descuentos porcentuales o fijos, con nombre y vigencia opcional, sin modificar su precio original.
 - La venta y el comprobante conservan el precio original, el precio aplicado y el ahorro histórico.
 - Los cambios de costo/precio generan historial.
