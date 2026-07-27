@@ -5,6 +5,8 @@ exports.dashboard = (req,res) => {
   res.json({
     ventas_hoy: one("SELECT COALESCE(SUM(total),0) valor FROM ventas WHERE estado='confirmada' AND date(fecha)=date('now','localtime')").valor,
     ventas_mes: one("SELECT COALESCE(SUM(total),0) valor FROM ventas WHERE estado='confirmada' AND strftime('%Y-%m',fecha)=strftime('%Y-%m','now','localtime')").valor,
+    compras_hoy: one("SELECT COALESCE(SUM(total),0) valor FROM compras WHERE estado='confirmada' AND date(fecha)=date('now','localtime')").valor,
+    compras_mes: one("SELECT COALESCE(SUM(total),0) valor FROM compras WHERE estado='confirmada' AND strftime('%Y-%m',fecha)=strftime('%Y-%m','now','localtime')").valor,
     productos: one('SELECT COUNT(*) valor FROM productos WHERE activo=1').valor,
     stock_bajo: one('SELECT COUNT(*) valor FROM productos WHERE activo=1 AND stock>0 AND stock<=stock_minimo').valor,
     agotados: one('SELECT COUNT(*) valor FROM productos WHERE activo=1 AND stock=0').valor,
@@ -26,13 +28,19 @@ exports.dashboard = (req,res) => {
       SELECT date('now','localtime','-6 days') UNION ALL SELECT date(fecha,'+1 day') FROM dias WHERE fecha<date('now','localtime')
     ) SELECT dias.fecha,COALESCE(SUM(v.total),0) total FROM dias LEFT JOIN ventas v ON date(v.fecha)=dias.fecha AND v.estado='confirmada'
       GROUP BY dias.fecha ORDER BY dias.fecha`).all(),
+    compras_7_dias: db.prepare(`WITH RECURSIVE dias(fecha) AS (
+      SELECT date('now','localtime','-6 days') UNION ALL SELECT date(fecha,'+1 day') FROM dias WHERE fecha<date('now','localtime')
+    ) SELECT dias.fecha,COALESCE(SUM(c.total),0) total FROM dias LEFT JOIN compras c ON date(c.fecha)=dias.fecha AND c.estado='confirmada'
+      GROUP BY dias.fecha ORDER BY dias.fecha`).all(),
     ventas_categoria: db.prepare(`SELECT COALESCE(c.nombre,'Sin categoría') categoria,SUM(d.subtotal) total
       FROM detalle_venta d JOIN ventas v ON v.id=d.venta_id JOIN productos p ON p.id=d.producto_id
       LEFT JOIN categorias c ON c.id=p.categoria_id WHERE v.estado='confirmada'
       GROUP BY c.id ORDER BY total DESC LIMIT 6`).all(),
     mas_vendidos: db.prepare(`SELECT p.nombre,SUM(d.cantidad) cantidad FROM detalle_venta d JOIN productos p ON p.id=d.producto_id
       JOIN ventas v ON v.id=d.venta_id WHERE v.estado='confirmada' GROUP BY p.id ORDER BY cantidad DESC LIMIT 5`).all(),
-    ultimas_ventas: db.prepare('SELECT numero,total,fecha FROM ventas ORDER BY id DESC LIMIT 5').all()
+    ultimas_ventas: db.prepare('SELECT numero,total,fecha FROM ventas ORDER BY id DESC LIMIT 5').all(),
+    ultimas_compras: db.prepare(`SELECT c.numero,c.total,c.fecha,p.razon_social proveedor FROM compras c
+      JOIN proveedores p ON p.id=c.proveedor_id ORDER BY c.id DESC LIMIT 5`).all()
   });
 };
 exports.suppliers = (req,res) => res.json(db.prepare('SELECT * FROM proveedores ORDER BY razon_social').all());

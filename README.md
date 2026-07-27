@@ -44,9 +44,11 @@ Antes de usar el sistema en producción, cambie `ADMIN_PASSWORD` y `SESSION_SECR
 - Los conteos físicos comparan stock esperado y real; al finalizar, las diferencias generan ajustes trazables.
 - Los combos exigen al menos dos productos y descuentan automáticamente las existencias de sus componentes.
 - El precio original del combo se calcula sumando los precios base de sus componentes; su precio especial debe producir un ahorro real.
+- Los combos no requieren código de barras y permiten definir el porcentaje de descuento o el precio final; ambos valores se sincronizan.
 - Los productos admiten descuentos porcentuales o fijos, con nombre y vigencia opcional, sin modificar su precio original.
 - La venta y el comprobante conservan el precio original, el precio aplicado y el ahorro histórico.
 - Los cambios de costo/precio generan historial.
+- Compras diferencia explícitamente el costo pagado al proveedor del precio de venta y el dashboard muestra compras diarias, mensuales y su tendencia.
 - El vendedor no puede acceder a costos, proveedores, usuarios, inventario administrativo ni configuración.
 - SQLite usa claves foráneas, restricciones, índices y modo WAL.
 

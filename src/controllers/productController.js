@@ -109,7 +109,7 @@ exports.combo = (req,res) => {
   const uniqueItems=Array.isArray(items)?new Set(items.map(item=>Number(item.producto_id))):new Set();
   if(!combo.es_combo || !Array.isArray(items) || items.length<2 || uniqueItems.size<2)
     throw bad('Una promoción combo debe contener al menos dos productos diferentes');
-  db.transaction(()=>{
+  const result=db.transaction(()=>{
     db.prepare('DELETE FROM combo_detalle WHERE combo_producto_id=?').run(combo.id);
     const insert=db.prepare('INSERT INTO combo_detalle(combo_producto_id,componente_producto_id,cantidad) VALUES(?,?,?)');
     for(const item of items){
@@ -119,8 +119,21 @@ exports.combo = (req,res) => {
     }
     const original=db.prepare(`SELECT COALESCE(SUM(p.precio*cd.cantidad),0) total FROM combo_detalle cd
       JOIN productos p ON p.id=cd.componente_producto_id WHERE cd.combo_producto_id=?`).get(combo.id).total;
-    if(combo.precio_base>=original)throw bad(`El precio especial del combo debe ser menor que la suma original (${original})`);
+    const requestedFinal=Number(req.body.precio_final),requestedPercent=Number(req.body.descuento_porcentaje);
+    let finalPrice=Number.isFinite(requestedFinal)&&requestedFinal>0?requestedFinal:null;
+    if(finalPrice===null&&Number.isFinite(requestedPercent)&&requestedPercent>0&&requestedPercent<100)
+      finalPrice=Math.round(original*(1-requestedPercent/100)*100)/100;
+    if(!Number.isFinite(finalPrice)||finalPrice<=0||finalPrice>=original)
+      throw bad(`Indique un precio final menor que la suma original (${original}) o un descuento entre 0% y 100%`);
+    finalPrice=Math.round(finalPrice*100)/100;
+    if(combo.precio_base!==finalPrice){
+      db.prepare('UPDATE productos SET precio=?,actualizado_en=CURRENT_TIMESTAMP WHERE id=?').run(finalPrice,combo.id);
+      db.prepare(`INSERT INTO historial_precios(producto_id,costo_anterior,costo_nuevo,precio_anterior,precio_nuevo,usuario_id)
+        VALUES(?,?,?,?,?,?)`).run(combo.id,combo.costo,combo.costo,combo.precio_base,finalPrice,req.session.user.id);
+    }
+    return {original,finalPrice,percent:Math.round((1-finalPrice/original)*10000)/100};
   })();
-  res.json({combo:Catalog.product(combo.id),items:Catalog.comboItems(combo.id)});
+  res.json({combo:Catalog.product(combo.id),items:Catalog.comboItems(combo.id),precio_original:result.original,
+    precio_final:result.finalPrice,descuento_porcentaje:result.percent});
 };
 exports.comboItems = (req,res) => res.json(Catalog.comboItems(req.params.id));
