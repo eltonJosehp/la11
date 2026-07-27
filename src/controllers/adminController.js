@@ -8,6 +8,18 @@ exports.dashboard = (req,res) => {
     productos: one('SELECT COUNT(*) valor FROM productos WHERE activo=1').valor,
     stock_bajo: one('SELECT COUNT(*) valor FROM productos WHERE activo=1 AND stock>0 AND stock<=stock_minimo').valor,
     agotados: one('SELECT COUNT(*) valor FROM productos WHERE activo=1 AND stock=0').valor,
+    valor_inventario: one('SELECT COALESCE(SUM(costo*stock),0) valor FROM productos WHERE activo=1 AND es_combo=0').valor,
+    margen_mes: one(`SELECT COALESCE(SUM((d.precio-p.costo)*d.cantidad),0) valor FROM detalle_venta d
+      JOIN ventas v ON v.id=d.venta_id JOIN productos p ON p.id=d.producto_id
+      WHERE v.estado='confirmada' AND strftime('%Y-%m',v.fecha)=strftime('%Y-%m','now','localtime')`).valor,
+    ventas_7_dias: db.prepare(`WITH RECURSIVE dias(fecha) AS (
+      SELECT date('now','localtime','-6 days') UNION ALL SELECT date(fecha,'+1 day') FROM dias WHERE fecha<date('now','localtime')
+    ) SELECT dias.fecha,COALESCE(SUM(v.total),0) total FROM dias LEFT JOIN ventas v ON date(v.fecha)=dias.fecha AND v.estado='confirmada'
+      GROUP BY dias.fecha ORDER BY dias.fecha`).all(),
+    ventas_categoria: db.prepare(`SELECT COALESCE(c.nombre,'Sin categoría') categoria,SUM(d.subtotal) total
+      FROM detalle_venta d JOIN ventas v ON v.id=d.venta_id JOIN productos p ON p.id=d.producto_id
+      LEFT JOIN categorias c ON c.id=p.categoria_id WHERE v.estado='confirmada'
+      GROUP BY c.id ORDER BY total DESC LIMIT 6`).all(),
     mas_vendidos: db.prepare(`SELECT p.nombre,SUM(d.cantidad) cantidad FROM detalle_venta d JOIN productos p ON p.id=d.producto_id
       JOIN ventas v ON v.id=d.venta_id WHERE v.estado='confirmada' GROUP BY p.id ORDER BY cantidad DESC LIMIT 5`).all(),
     ultimas_ventas: db.prepare('SELECT numero,total,fecha FROM ventas ORDER BY id DESC LIMIT 5').all()
@@ -57,4 +69,11 @@ exports.qr=(req,res)=>{
   const value=`/uploads/${req.file.filename}`;
   db.prepare(`INSERT INTO configuracion(clave,valor) VALUES('qr_pago',?) ON CONFLICT(clave) DO UPDATE SET valor=excluded.valor,actualizado_en=CURRENT_TIMESTAMP`).run(value);
   res.json({qr_pago:value});
+};
+exports.saveConfig=(req,res)=>{
+  const allowed=['nombre_negocio','direccion_negocio','telefono_negocio','mensaje_comprobante'];
+  const save=db.prepare(`INSERT INTO configuracion(clave,valor) VALUES(?,?)
+    ON CONFLICT(clave) DO UPDATE SET valor=excluded.valor,actualizado_en=CURRENT_TIMESTAMP`);
+  db.transaction(()=>allowed.forEach(key=>save.run(key,String(req.body[key]||'').trim())))();
+  res.json({ok:true});
 };

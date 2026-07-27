@@ -9,6 +9,7 @@ r.post('/auth/login',auth.login);r.get('/auth/me',auth.me);r.post('/auth/logout'
 r.use(requireAuth);
 r.get('/products',products.list);r.get('/products/barcode/:code',products.barcode);
 r.get('/meta',products.meta);r.post('/sales',ops.sale);r.get('/sales',ops.sales);
+r.get('/sales/:id',ops.saleDetails);r.get('/sales/:id/receipt',ops.receipt);
 r.get('/config',admin.config);
 r.use(requireRole('administrador'));
 r.post('/products',products.save);r.put('/products/:id',products.update);r.delete('/products/:id',products.remove);
@@ -16,8 +17,12 @@ r.post('/products/:id/adjust',products.adjust);r.post('/products/:id/image',uplo
 r.get('/products/:id/combo',products.comboItems);r.put('/products/:id/combo',products.combo);
 r.post('/meta/:type',products.addMeta);r.put('/meta/:type/:id',products.updateMeta);r.delete('/meta/:type/:id',products.deleteMeta);
 r.get('/movements',ops.movements);r.post('/purchases',ops.purchase);
+r.get('/inventory-counts',ops.inventoryCounts);r.post('/inventory-counts',ops.createInventoryCount);
+r.get('/inventory-counts/:id',ops.inventoryCount);r.put('/inventory-counts/:id/items/:productId',ops.updateInventoryCount);
+r.post('/inventory-counts/:id/finish',ops.finishInventoryCount);
 r.get('/dashboard',admin.dashboard);r.get('/suppliers',admin.suppliers);r.post('/suppliers',admin.saveSupplier);
 r.put('/suppliers/:id',admin.updateSupplier);r.delete('/suppliers/:id',admin.deleteSupplier);
 r.get('/users',admin.users);r.post('/users',admin.saveUser);r.put('/users/:id',admin.updateUser);r.delete('/users/:id',admin.deleteUser);
 r.post('/config/qr',upload.single('qr'),admin.qr);
+r.put('/config',admin.saveConfig);
 module.exports=r;

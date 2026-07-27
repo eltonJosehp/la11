@@ -1,6 +1,6 @@
 # Licorería La 11 — Gestión de bodega
 
-Aplicación web responsive con arquitectura MVC, Node.js, Express y SQLite. Incluye POS, compras, productos, proveedores, inventario trazable, usuarios por rol, pagos en efectivo/QR y dashboard administrativo.
+Aplicación web responsive con arquitectura MVC, Node.js, Express y SQLite. Incluye POS, compras, productos, proveedores, inventario trazable, usuarios por rol, pagos en efectivo/QR, comprobantes PDF y dashboard administrativo con gráficos.
 
 ## Puesta en marcha
 
@@ -40,6 +40,9 @@ Antes de usar el sistema en producción, cambie `ADMIN_PASSWORD` y `SESSION_SECR
 - Las compras y ventas se confirman dentro de transacciones SQLite.
 - El servidor rechaza ventas sin stock, aunque el frontend sea manipulado.
 - El detalle de venta conserva el precio histórico aplicado.
+- Cada venta genera un comprobante PDF descargable inmediatamente o desde el historial.
+- Los conteos físicos comparan stock esperado y real; al finalizar, las diferencias generan ajustes trazables.
+- Los combos exigen al menos dos productos y descuentan automáticamente las existencias de sus componentes.
 - Los cambios de costo/precio generan historial.
 - El vendedor no puede acceder a costos, proveedores, usuarios, inventario administrativo ni configuración.
 - SQLite usa claves foráneas, restricciones, índices y modo WAL.

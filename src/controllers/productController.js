@@ -90,7 +90,9 @@ exports.image = (req,res) => {
 exports.combo = (req,res) => {
   const combo=Catalog.product(req.params.id),items=req.body.items;
   if(!combo) return res.status(404).json({error:'Producto no encontrado'});
-  if(!combo.es_combo || !Array.isArray(items) || !items.length) throw bad('El combo debe tener al menos un componente');
+  const uniqueItems=Array.isArray(items)?new Set(items.map(item=>Number(item.producto_id))):new Set();
+  if(!combo.es_combo || !Array.isArray(items) || items.length<2 || uniqueItems.size<2)
+    throw bad('Una promoción combo debe contener al menos dos productos diferentes');
   db.transaction(()=>{
     db.prepare('DELETE FROM combo_detalle WHERE combo_producto_id=?').run(combo.id);
     const insert=db.prepare('INSERT INTO combo_detalle(combo_producto_id,componente_producto_id,cantidad) VALUES(?,?,?)');

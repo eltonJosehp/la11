@@ -107,6 +107,28 @@ CREATE TABLE IF NOT EXISTS combo_detalle (
   FOREIGN KEY(combo_producto_id) REFERENCES productos(id),
   FOREIGN KEY(componente_producto_id) REFERENCES productos(id)
 );
+CREATE TABLE IF NOT EXISTS conteos_inventario (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  numero TEXT NOT NULL UNIQUE,
+  fecha TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  usuario_id INTEGER NOT NULL,
+  estado TEXT NOT NULL DEFAULT 'borrador' CHECK(estado IN ('borrador','finalizado')),
+  observacion TEXT,
+  finalizado_en TEXT,
+  FOREIGN KEY(usuario_id) REFERENCES usuarios(id)
+);
+CREATE TABLE IF NOT EXISTS detalle_conteo_inventario (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  conteo_id INTEGER NOT NULL,
+  producto_id INTEGER NOT NULL,
+  stock_sistema REAL NOT NULL,
+  stock_fisico REAL,
+  diferencia REAL,
+  UNIQUE(conteo_id,producto_id),
+  FOREIGN KEY(conteo_id) REFERENCES conteos_inventario(id),
+  FOREIGN KEY(producto_id) REFERENCES productos(id)
+);
+CREATE INDEX IF NOT EXISTS idx_conteos_fecha ON conteos_inventario(fecha);
 `);
 
 const columns = table => db.prepare(`PRAGMA table_info(${table})`).all().map(column => column.name);
