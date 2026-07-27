@@ -28,8 +28,16 @@ async function stopScanner(){
   const scanner=activeScanner;
   activeScanner=null;
   if(!scanner)return;
-  try{if(scanner.getState?.()===2)await scanner.stop()}catch(e){}
+  try{if([2,3].includes(scanner.getState?.()))await scanner.stop()}catch(e){}
   try{scanner.clear()}catch(e){}
+}
+function scannerOptions(){
+  return {formatsToSupport:[
+    Html5QrcodeSupportedFormats.EAN_13,Html5QrcodeSupportedFormats.EAN_8,
+    Html5QrcodeSupportedFormats.UPC_A,Html5QrcodeSupportedFormats.UPC_E,
+    Html5QrcodeSupportedFormats.CODE_128,Html5QrcodeSupportedFormats.CODE_39,
+    Html5QrcodeSupportedFormats.ITF,Html5QrcodeSupportedFormats.CODABAR
+  ],verbose:false};
 }
 function cameraMessage(error){
   const text=String(error?.message||error||'');
@@ -51,12 +59,7 @@ async function openScanner({title='Escanear código',onCode,onManual}){
     $('#manualScan').onclick=()=>{modal.close();onManual?.()};
     return;
   }
-  activeScanner=new Html5Qrcode('scannerReader',{formatsToSupport:[
-    Html5QrcodeSupportedFormats.EAN_13,Html5QrcodeSupportedFormats.EAN_8,
-    Html5QrcodeSupportedFormats.UPC_A,Html5QrcodeSupportedFormats.UPC_E,
-    Html5QrcodeSupportedFormats.CODE_128,Html5QrcodeSupportedFormats.CODE_39,
-    Html5QrcodeSupportedFormats.ITF,Html5QrcodeSupportedFormats.CODABAR
-  ],verbose:false});
+  activeScanner=new Html5Qrcode('scannerReader',scannerOptions());
   let cameras=[];
   const success=async decoded=>{
     const code=String(decoded||'').trim();
@@ -65,16 +68,12 @@ async function openScanner({title='Escanear código',onCode,onManual}){
   };
   const start=async cameraId=>{
     await stopScanner();
-    activeScanner=new Html5Qrcode('scannerReader',{formatsToSupport:[
-      Html5QrcodeSupportedFormats.EAN_13,Html5QrcodeSupportedFormats.EAN_8,
-      Html5QrcodeSupportedFormats.UPC_A,Html5QrcodeSupportedFormats.UPC_E,
-      Html5QrcodeSupportedFormats.CODE_128,Html5QrcodeSupportedFormats.CODE_39,
-      Html5QrcodeSupportedFormats.ITF,Html5QrcodeSupportedFormats.CODABAR
-    ],verbose:false});
+    activeScanner=new Html5Qrcode('scannerReader',scannerOptions());
     status.textContent='Iniciando cámara…';status.classList.remove('error-state');
     try{
-      await activeScanner.start(cameraId,{fps:12,qrbox:(w,h)=>({width:Math.min(w*.9,420),height:Math.min(h*.38,180)}),aspectRatio:1.777},success,()=>{});
-      status.textContent='Cámara activa. Centre el código de barras dentro del recuadro.';
+      await activeScanner.start(cameraId,{fps:18,qrbox:(w,h)=>({width:Math.floor(Math.min(w*.94,520)),height:Math.floor(Math.min(h*.28,150))}),aspectRatio:1.777,disableFlip:false},success,()=>{});
+      try{await activeScanner.applyVideoConstraints({advanced:[{focusMode:'continuous'}]})}catch(e){}
+      status.textContent='Buscando código… Coloque todas las barras dentro del recuadro horizontal y evite reflejos.';
     }catch(error){status.textContent=cameraMessage(error);status.classList.add('error-state')}
   };
   const load=async()=>{
@@ -92,9 +91,10 @@ async function openScanner({title='Escanear código',onCode,onManual}){
   $('#barcodeImage').onchange=async e=>{
     const file=e.target.files?.[0];if(!file)return;
     await stopScanner();
-    activeScanner=new Html5Qrcode('scannerReader');
+    activeScanner=new Html5Qrcode('scannerReader',scannerOptions());
+    status.textContent='Analizando fotografía…';status.classList.remove('error-state');
     try{const code=await activeScanner.scanFile(file,true);await stopScanner();modal.close();onCode(String(code).trim())}
-    catch(error){status.textContent='No se detectó un código en la foto. Intente acercarse y evitar reflejos.';status.classList.add('error-state')}
+    catch(error){status.textContent='No se detectó un código. Tome la foto de frente, con buena luz y ocupando casi todo el ancho.';status.classList.add('error-state')}
   };
   load();
 }
