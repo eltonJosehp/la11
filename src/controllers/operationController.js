@@ -34,8 +34,8 @@ exports.sale = (req, res) => {
     const v = db.prepare(`INSERT INTO ventas(numero,fecha,vendedor_id,total,metodo_pago) VALUES(?,CURRENT_TIMESTAMP,?,?,?)`)
       .run(numero, req.session.user.id, total, metodo_pago);
     for (const l of lines) {
-      db.prepare('INSERT INTO detalle_venta(venta_id,producto_id,cantidad,precio,subtotal) VALUES(?,?,?,?,?)')
-        .run(v.lastInsertRowid, l.p.id, l.qty, l.p.precio, l.subtotal);
+      db.prepare(`INSERT INTO detalle_venta(venta_id,producto_id,cantidad,precio,subtotal,precio_original,descuento)
+        VALUES(?,?,?,?,?,?,?)`).run(v.lastInsertRowid,l.p.id,l.qty,l.p.precio,l.subtotal,l.p.precio_original,l.p.ahorro);
     }
     for(const [productId,qty] of consumption){
       const product=db.prepare('SELECT * FROM productos WHERE id=?').get(productId),next=product.stock-qty;
@@ -46,7 +46,8 @@ exports.sale = (req, res) => {
     const cash = metodo_pago === 'efectivo' ? Number(recibido) : total;
     db.prepare('INSERT INTO pagos(venta_id,metodo,importe,recibido,vuelto,confirmado) VALUES(?,?,?,?,?,1)')
       .run(v.lastInsertRowid, metodo_pago, total, cash, Math.max(0, cash-total));
-    return { id: v.lastInsertRowid, numero, total, vuelto: Math.max(0, cash-total), comprobante: `/api/sales/${v.lastInsertRowid}/receipt` };
+    const ahorro=Math.round(lines.reduce((sum,line)=>sum+line.p.ahorro*line.qty,0)*100)/100;
+    return { id: v.lastInsertRowid, numero, total, ahorro, vuelto: Math.max(0, cash-total), comprobante: `/api/sales/${v.lastInsertRowid}/receipt` };
   })();
   res.status(201).json(result);
 };
@@ -96,7 +97,9 @@ const getSale = (id,user) => {
     FROM ventas v JOIN usuarios u ON u.id=v.vendedor_id LEFT JOIN pagos p ON p.venta_id=v.id
     WHERE v.id=?`).get(id);
   if(!sale || (user.rol==='vendedor' && sale.vendedor_id!==user.id)) return null;
-  sale.items=db.prepare(`SELECT d.*,p.nombre,p.codigo_barras,p.codigo_interno
+  sale.items=db.prepare(`SELECT d.*,p.nombre,p.codigo_barras,p.codigo_interno,
+    COALESCE(d.precio_original,d.precio) precio_original,
+    COALESCE(d.descuento,MAX(0,COALESCE(d.precio_original,d.precio)-d.precio)) descuento
     FROM detalle_venta d JOIN productos p ON p.id=d.producto_id WHERE d.venta_id=? ORDER BY d.id`).all(id);
   return sale;
 };
@@ -111,7 +114,7 @@ exports.receipt=(req,res)=>{
   const sale=getSale(Number(req.params.id),req.session.user);
   if(!sale)return res.status(404).json({error:'Venta no encontrada'});
   const config=Object.fromEntries(db.prepare('SELECT clave,valor FROM configuracion').all().map(x=>[x.clave,x.valor]));
-  const width=226, height=Math.max(420,280+sale.items.length*38);
+  const width=226, height=Math.max(420,290+sale.items.length*52);
   const doc=new PDFDocument({size:[width,height],margin:18,info:{Title:`Comprobante ${sale.numero}`,Author:'Licorería La 11'}});
   res.setHeader('Content-Type','application/pdf');
   res.setHeader('Content-Disposition',`${req.query.view==='1'?'inline':'attachment'}; filename="comprobante-${sale.numero}.pdf"`);
@@ -127,10 +130,14 @@ exports.receipt=(req,res)=>{
   doc.moveDown(.5);
   sale.items.forEach(item=>{
     doc.font('Helvetica-Bold').fontSize(8).text(item.nombre);
+    if(Number(item.descuento)>0)doc.font('Helvetica').fillColor('#555').text(`Antes $${Number(item.precio_original).toLocaleString('es-CO')} · Ahorro $${Number(item.descuento*item.cantidad).toLocaleString('es-CO')}`);
+    doc.fillColor('#000');
     doc.font('Helvetica').text(`${item.cantidad} × $${Number(item.precio).toLocaleString('es-CO')}   $${Number(item.subtotal).toLocaleString('es-CO')}`,{align:'right'});
   });
   doc.moveDown(.5).moveTo(18,doc.y).lineTo(width-18,doc.y).stroke();
   doc.moveDown(.5).font('Helvetica-Bold').fontSize(12).text(`TOTAL  $${Number(sale.total).toLocaleString('es-CO')}`,{align:'right'});
+  const totalSaving=sale.items.reduce((sum,item)=>sum+Number(item.descuento||0)*Number(item.cantidad),0);
+  if(totalSaving>0)doc.font('Helvetica-Bold').fillColor('#176642').fontSize(8).text(`AHORRO TOTAL  $${totalSaving.toLocaleString('es-CO')}`,{align:'right'}).fillColor('#000');
   if(sale.metodo_pago==='efectivo')doc.font('Helvetica').fontSize(8).text(`Recibido: $${Number(sale.recibido||0).toLocaleString('es-CO')}  ·  Vuelto: $${Number(sale.vuelto||0).toLocaleString('es-CO')}`,{align:'right'});
   doc.moveDown(1.2).font('Helvetica').fontSize(8).text(config.mensaje_comprobante||'¡Gracias por su compra!',{align:'center'});
   doc.text('Conserve este comprobante.',{align:'center'});

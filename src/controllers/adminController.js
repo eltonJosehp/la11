@@ -9,9 +9,19 @@ exports.dashboard = (req,res) => {
     stock_bajo: one('SELECT COUNT(*) valor FROM productos WHERE activo=1 AND stock>0 AND stock<=stock_minimo').valor,
     agotados: one('SELECT COUNT(*) valor FROM productos WHERE activo=1 AND stock=0').valor,
     valor_inventario: one('SELECT COALESCE(SUM(costo*stock),0) valor FROM productos WHERE activo=1 AND es_combo=0').valor,
-    margen_mes: one(`SELECT COALESCE(SUM((d.precio-p.costo)*d.cantidad),0) valor FROM detalle_venta d
+    margen_mes: one(`SELECT COALESCE(SUM((d.precio-(CASE WHEN p.es_combo=1 THEN COALESCE((
+      SELECT SUM(cp.costo*cd.cantidad) FROM combo_detalle cd JOIN productos cp ON cp.id=cd.componente_producto_id
+      WHERE cd.combo_producto_id=p.id),0) ELSE p.costo END))*d.cantidad),0) valor FROM detalle_venta d
       JOIN ventas v ON v.id=d.venta_id JOIN productos p ON p.id=d.producto_id
       WHERE v.estado='confirmada' AND strftime('%Y-%m',v.fecha)=strftime('%Y-%m','now','localtime')`).valor,
+    ahorro_clientes_mes: one(`SELECT COALESCE(SUM(COALESCE(d.descuento,0)*d.cantidad),0) valor
+      FROM detalle_venta d JOIN ventas v ON v.id=d.venta_id WHERE v.estado='confirmada'
+      AND strftime('%Y-%m',v.fecha)=strftime('%Y-%m','now','localtime')`).valor,
+    promociones_activas: one(`SELECT COUNT(*) valor FROM productos p WHERE p.activo=1 AND (
+      (p.es_combo=1 AND p.precio<(SELECT COALESCE(SUM(cp.precio*cd.cantidad),0) FROM combo_detalle cd JOIN productos cp ON cp.id=cd.componente_producto_id WHERE cd.combo_producto_id=p.id))
+      OR (p.es_combo=0 AND p.descuento_tipo<>'ninguno' AND p.descuento_valor>0
+        AND (p.descuento_inicio IS NULL OR date(p.descuento_inicio)<=date('now','localtime'))
+        AND (p.descuento_fin IS NULL OR date(p.descuento_fin)>=date('now','localtime'))))`).valor,
     ventas_7_dias: db.prepare(`WITH RECURSIVE dias(fecha) AS (
       SELECT date('now','localtime','-6 days') UNION ALL SELECT date(fecha,'+1 day') FROM dias WHERE fecha<date('now','localtime')
     ) SELECT dias.fecha,COALESCE(SUM(v.total),0) total FROM dias LEFT JOIN ventas v ON date(v.fecha)=dias.fecha AND v.estado='confirmada'

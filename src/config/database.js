@@ -135,6 +135,14 @@ const columns = table => db.prepare(`PRAGMA table_info(${table})`).all().map(col
 const productColumns = columns('productos');
 if (!productColumns.includes('imagen')) db.exec('ALTER TABLE productos ADD COLUMN imagen TEXT');
 if (!productColumns.includes('es_combo')) db.exec('ALTER TABLE productos ADD COLUMN es_combo INTEGER NOT NULL DEFAULT 0 CHECK(es_combo IN (0,1))');
+if (!productColumns.includes('descuento_tipo')) db.exec("ALTER TABLE productos ADD COLUMN descuento_tipo TEXT NOT NULL DEFAULT 'ninguno'");
+if (!productColumns.includes('descuento_valor')) db.exec('ALTER TABLE productos ADD COLUMN descuento_valor REAL NOT NULL DEFAULT 0');
+if (!productColumns.includes('descuento_inicio')) db.exec('ALTER TABLE productos ADD COLUMN descuento_inicio TEXT');
+if (!productColumns.includes('descuento_fin')) db.exec('ALTER TABLE productos ADD COLUMN descuento_fin TEXT');
+if (!productColumns.includes('descuento_nombre')) db.exec('ALTER TABLE productos ADD COLUMN descuento_nombre TEXT');
+const saleDetailColumns = columns('detalle_venta');
+if (!saleDetailColumns.includes('precio_original')) db.exec('ALTER TABLE detalle_venta ADD COLUMN precio_original REAL');
+if (!saleDetailColumns.includes('descuento')) db.exec('ALTER TABLE detalle_venta ADD COLUMN descuento REAL NOT NULL DEFAULT 0');
 
 db.prepare("INSERT OR IGNORE INTO roles(id,nombre) VALUES(1,'administrador'),(2,'vendedor')").run();
 const initialCategories = [

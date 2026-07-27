@@ -1,6 +1,15 @@
 const db = require('../config/database');
 const Catalog = require('../models/catalog');
 const bad = msg => Object.assign(new Error(msg), { status: 400 });
+const discountData = b => {
+  const isCombo=b.es_combo===true||b.es_combo==='1',type=isCombo?'ninguno':(b.descuento_tipo||'ninguno');
+  const value=type==='ninguno'?0:Number(b.descuento_valor||0),start=b.descuento_inicio||null,end=b.descuento_fin||null;
+  if(!['ninguno','porcentaje','fijo'].includes(type)||!Number.isFinite(value)||value<0)throw bad('Descuento inválido');
+  if(type==='porcentaje'&&value>100)throw bad('El descuento porcentual no puede superar 100%');
+  if(type==='fijo'&&value>Number(b.precio))throw bad('El descuento fijo no puede superar el precio original');
+  if(start&&end&&start>end)throw bad('La fecha final del descuento debe ser posterior a la inicial');
+  return {type,value,start,end,name:type==='ninguno'?null:(String(b.descuento_nombre||'Oferta').trim()||'Oferta')};
+};
 const visibleProduct = (product,role) => {
   if(role!=='vendedor') return product;
   const { costo, ...visible }=product;
@@ -15,26 +24,33 @@ exports.barcode = (req, res) => {
 exports.save = (req, res) => {
   const b = req.body;
   if (!b.codigo_interno?.trim() || !b.nombre?.trim() || Number(b.precio) < 0) throw bad('Código, nombre y precio válidos son obligatorios');
-  const info = db.prepare(`INSERT INTO productos(codigo_interno,codigo_barras,nombre,categoria_id,marca_id,descripcion,costo,precio,stock_minimo,unidad,vencimiento,es_combo)
-    VALUES(?,?,?,?,?,?,?,?,?,?,?,?)`).run(b.codigo_interno.trim(), b.codigo_barras?.trim() || null, b.nombre.trim(),
+  const discount=discountData(b);
+  const info = db.prepare(`INSERT INTO productos(codigo_interno,codigo_barras,nombre,categoria_id,marca_id,descripcion,costo,precio,stock_minimo,unidad,vencimiento,es_combo,
+    descuento_tipo,descuento_valor,descuento_inicio,descuento_fin,descuento_nombre)
+    VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`).run(b.codigo_interno.trim(), b.codigo_barras?.trim() || null, b.nombre.trim(),
     b.categoria_id || null, b.marca_id || null, b.descripcion || null, Number(b.costo || 0), Number(b.precio),
-    Number(b.stock_minimo || 0), b.unidad || 'unidad', b.vencimiento || null, b.es_combo === true || b.es_combo === '1' ? 1 : 0);
+    Number(b.stock_minimo || 0), b.unidad || 'unidad', b.vencimiento || null, b.es_combo === true || b.es_combo === '1' ? 1 : 0,
+    discount.type,discount.value,discount.start,discount.end,discount.name);
   res.status(201).json(Catalog.product(info.lastInsertRowid));
 };
 exports.update = (req, res) => {
   const old = Catalog.product(req.params.id);
   if (!old) return res.status(404).json({ error: 'Producto no encontrado' });
-  const b = req.body, costo = Number(b.costo), precio = Number(b.precio);
+  const b = req.body, costo = Number(b.costo), precio = Number(b.precio),discount=discountData(b);
+  if(!Number.isFinite(costo)||costo<0||!Number.isFinite(precio)||precio<0)throw bad('Costo o precio inválido');
+  if((b.es_combo===true||b.es_combo==='1')&&Catalog.comboItems(old.id).length>=2&&precio>=old.precio_original)
+    throw bad(`El precio especial del combo debe ser menor que la suma original (${old.precio_original})`);
   db.transaction(() => {
     db.prepare(`UPDATE productos SET codigo_interno=?,codigo_barras=?,nombre=?,categoria_id=?,marca_id=?,descripcion=?,
-      costo=?,precio=?,stock_minimo=?,unidad=?,vencimiento=?,activo=?,es_combo=?,actualizado_en=CURRENT_TIMESTAMP WHERE id=?`)
+      costo=?,precio=?,stock_minimo=?,unidad=?,vencimiento=?,activo=?,es_combo=?,descuento_tipo=?,descuento_valor=?,
+      descuento_inicio=?,descuento_fin=?,descuento_nombre=?,actualizado_en=CURRENT_TIMESTAMP WHERE id=?`)
       .run(b.codigo_interno, b.codigo_barras || null, b.nombre, b.categoria_id || null, b.marca_id || null,
         b.descripcion || null, costo, precio, Number(b.stock_minimo || 0), b.unidad || 'unidad',
         b.vencimiento || null, (b.activo === false || b.activo === '0' || b.activo === 0) ? 0 : 1,
-        b.es_combo === true || b.es_combo === '1' ? 1 : 0, req.params.id);
-    if (old.costo !== costo || old.precio !== precio)
+        b.es_combo === true || b.es_combo === '1' ? 1 : 0,discount.type,discount.value,discount.start,discount.end,discount.name,req.params.id);
+    if (old.costo !== costo || old.precio_base !== precio)
       db.prepare(`INSERT INTO historial_precios(producto_id,costo_anterior,costo_nuevo,precio_anterior,precio_nuevo,usuario_id)
-        VALUES(?,?,?,?,?,?)`).run(old.id, old.costo, costo, old.precio, precio, req.session.user.id);
+        VALUES(?,?,?,?,?,?)`).run(old.id, old.costo, costo, old.precio_base, precio, req.session.user.id);
   })();
   res.json(Catalog.product(req.params.id));
 };
@@ -101,6 +117,9 @@ exports.combo = (req,res) => {
       if(!product||product.es_combo||product.id===combo.id||quantity<=0) throw bad('Componente de combo inválido');
       insert.run(combo.id,product.id,quantity);
     }
+    const original=db.prepare(`SELECT COALESCE(SUM(p.precio*cd.cantidad),0) total FROM combo_detalle cd
+      JOIN productos p ON p.id=cd.componente_producto_id WHERE cd.combo_producto_id=?`).get(combo.id).total;
+    if(combo.precio_base>=original)throw bad(`El precio especial del combo debe ser menor que la suma original (${original})`);
   })();
   res.json({combo:Catalog.product(combo.id),items:Catalog.comboItems(combo.id)});
 };
